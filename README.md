@@ -40,6 +40,20 @@ pull.close
 ctx.term
 ```
 
+PLAIN servers require an explicit policy. Pass fixed username/password pairs
+through `plain_auth`:
+
+```crystal
+pull = ctx.socket(
+  "pull",
+  plain_auth: [{"alice", "secret"}, {"bob", "hunter2"}]
+)
+```
+
+Clients use `Socket#set_plain_client`. PLAIN authenticates but does not encrypt
+traffic. Bare `plain_server: true` uses standard ZAP and fails closed without a
+ZAP handler.
+
 ## More
 
 - Architecture and API coverage: [`doc/architecture.md`](doc/architecture.md)
