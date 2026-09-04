@@ -303,6 +303,13 @@ module OMQ
       events : LibC::Short
     end
 
+    struct PlainCredential
+      username : UInt8*
+      username_size : LibC::SizeT
+      password : UInt8*
+      password_size : LibC::SizeT
+    end
+
     fun version = zmq_version(major : LibC::Int*, minor : LibC::Int*, patch : LibC::Int*) : Nil
     fun has = zmq_has(capability : LibC::Char*) : LibC::Int
     fun sleep = zmq_sleep(seconds : LibC::Int) : Nil
@@ -320,6 +327,7 @@ module OMQ
     fun ctx_from_share_key = omq_ctx_from_share_key(high : UInt64, low : UInt64) : Void*
 
     fun socket = zmq_socket(context : Void*, socket_type : LibC::Int) : Void*
+    fun socket_set_plain_server_credentials = omq_socket_set_plain_server_credentials(socket : Void*, credentials : PlainCredential*, credential_count : LibC::SizeT) : LibC::Int
     fun close = zmq_close(socket : Void*) : LibC::Int
     fun bind = zmq_bind(socket : Void*, endpoint : LibC::Char*) : LibC::Int
     fun connect = zmq_connect(socket : Void*, endpoint : LibC::Char*) : LibC::Int
@@ -699,6 +707,11 @@ module OMQ
       @raw = raw
     end
 
+    # Creates a socket and applies options before its first use.
+    #
+    # A fixed PLAIN server policy can be passed as `plain_auth` or
+    # `plain_server_credentials`, with an enumerable of username/password
+    # string tuples. An empty enumerable rejects every client.
     def socket(socket_type, **options) : Socket
       context = reserve_socket
       raw = LibZMQ.socket(context, OMQ.socket_type_id(socket_type))
@@ -933,6 +946,8 @@ module OMQ
         socket.set_wss_trust_system(value)
       when :plain_server
         socket.set_plain_server(value)
+      when :plain_auth, :plain_server_credentials
+        socket.set_plain_server_credentials(value)
       when :plain_username
         socket.set_plain_username(value)
       when :plain_password
@@ -1335,8 +1350,45 @@ module OMQ
       set_i32(WSS_TRUST_SYSTEM, option_bool_i32(value))
     end
 
+    # Enables standard PLAIN server mode backed by ZAP.
+    #
+    # Call before bind or connect. Authentication fails closed unless a ZAP
+    # handler is bound at `inproc://zeromq.zap.01` in this context.
     def set_plain_server(value) : Bool
       set_i32(PLAIN_SERVER, option_bool_i32(value))
+    end
+
+    # Configures an exact, case-sensitive PLAIN server credential allowlist.
+    #
+    # Call before bind or connect. Each username and password must contain at
+    # most 255 ASCII VCHAR bytes. Credentials are copied by the native library.
+    # An empty enumerable rejects every client. PLAIN authenticates clients but
+    # does not encrypt traffic.
+    #
+    # Returns `true` on success. Raises `OMQ::Error` for invalid credentials or
+    # when the socket is already bound or connected.
+    def set_plain_server_credentials(credentials : Enumerable(Tuple(String, String))) : Bool
+      pairs = credentials.to_a
+      native = pairs.map do |username, password|
+        LibZMQ::PlainCredential.new(
+          username: username.to_unsafe,
+          username_size: username.bytesize,
+          password: password.to_unsafe,
+          password_size: password.bytesize
+        )
+      end
+      pointer = native.empty? ? Pointer(LibZMQ::PlainCredential).null : native.to_unsafe
+      with_socket do |socket|
+        OMQ.check_rc(LibZMQ.socket_set_plain_server_credentials(socket, pointer, native.size))
+      end
+      true
+    end
+
+    # Raises `ArgumentError` when credentials are not username/password tuples.
+    def set_plain_server_credentials(credentials) : Bool
+      raise ArgumentError.new(
+        "PLAIN server credentials must be username/password string pairs"
+      )
     end
 
     def set_plain_username(value) : Bool
@@ -1347,6 +1399,10 @@ module OMQ
       set_string(PLAIN_PASSWORD, option_string(value))
     end
 
+    # Configures PLAIN client credentials.
+    #
+    # Each value must contain at most 255 ASCII VCHAR bytes. PLAIN
+    # authenticates the client but does not encrypt traffic.
     def set_plain_client(username : String, password : String) : Bool
       set_plain_username(username)
       set_plain_password(password)

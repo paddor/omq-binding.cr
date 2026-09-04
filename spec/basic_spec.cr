@@ -118,6 +118,32 @@ describe OMQ do
     ctx.term
   end
 
+  it "accepts a PLAIN credential allowlist" do
+    ctx = OMQ.context
+    pull = ctx.socket(
+      "pull",
+      linger: 0,
+      recv_timeout: 5000,
+      plain_auth: [{"alice", "secret"}, {"bob", "hunter2"}]
+    )
+    alice = ctx.socket("push", linger: 0, send_timeout: 5000)
+    bob = ctx.socket("push", linger: 0, send_timeout: 5000)
+    alice.set_plain_client("alice", "secret")
+    bob.set_plain_client("bob", "hunter2")
+
+    endpoint = pull.bind("tcp://127.0.0.1:*")
+    alice.connect(endpoint)
+    bob.connect(endpoint)
+    alice.send("alice")
+    bob.send("bob")
+    [pull.recv.not_nil!, pull.recv.not_nil!].sort.should eq(["alice", "bob"])
+
+    bob.close
+    alice.close
+    pull.close
+    ctx.term
+  end
+
   it "applies socket options" do
     ctx = OMQ.context
     socket = ctx.socket("push", linger: 0, send_timeout: 10, arena_threshold: 2048)
