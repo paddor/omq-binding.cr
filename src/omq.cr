@@ -327,6 +327,7 @@ module OMQ
     fun ctx_from_share_key = omq_ctx_from_share_key(high : UInt64, low : UInt64) : Void*
 
     fun socket = zmq_socket(context : Void*, socket_type : LibC::Int) : Void*
+    fun socket_allow_thread_migration = omq_socket_allow_thread_migration(socket : Void*) : LibC::Int
     fun socket_set_plain_server_credentials = omq_socket_set_plain_server_credentials(socket : Void*, credentials : PlainCredential*, credential_count : LibC::SizeT) : LibC::Int
     fun close = zmq_close(socket : Void*) : LibC::Int
     fun bind = zmq_bind(socket : Void*, endpoint : LibC::Char*) : LibC::Int
@@ -722,6 +723,9 @@ module OMQ
 
       socket = Socket.new(self, raw)
       begin
+        # Fibers may resume on another thread; calls on one socket stay
+        # serialized like libzmq requires.
+        OMQ.check_rc(LibZMQ.socket_allow_thread_migration(raw))
         options.each { |key, value| apply_socket_option(socket, key, value) }
       rescue ex
         socket.close

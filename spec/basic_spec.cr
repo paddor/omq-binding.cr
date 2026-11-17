@@ -198,4 +198,24 @@ describe OMQ do
     pub.close
     ctx.term
   end
+
+  it "lets a socket follow its fiber to another thread" do
+    ctx = OMQ.context
+    pull = ctx.socket("pull", linger: 0, recv_timeout: 1000)
+    push = ctx.socket("push", linger: 0, send_timeout: 1000)
+    push.connect(pull.bind("inproc://crystal-migration"))
+    push.send("here")
+    pull.recv.should eq("here")
+
+    received = Channel(String?).new
+    Fiber::ExecutionContext::Isolated.new("socket-migration") do
+      push.send("there")
+      received.send(pull.recv)
+    end
+    received.receive.should eq("there")
+
+    push.close
+    pull.close
+    ctx.term
+  end
 end
